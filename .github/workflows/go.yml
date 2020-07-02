@@ -43,6 +43,11 @@ jobs:
     - name: Build
       run: go build -v .
 
+    - uses: actions/upload-artifact@master
+      with:
+        name: executable
+        path: jwtproxy
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -81,4 +86,12 @@ jobs:
     - build
 
     steps:
+    - uses: actions/download-artifact@master
+      with:
+        name: code
+        path: .
+    - uses: actions/download-artifact@master
+      with:
+        name: executable
+        path: jwtproxy
     - run: docker build .

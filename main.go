@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 var remoteURLFlag = flag.String("remoteURL", "", "The remote host to proxy to.")
@@ -20,33 +19,40 @@ var keysFlag = flag.String("keys", "", "The location of the JSON map containing 
 var portFlag = flag.String("port", "", "The port for the proxy to listen on.")
 var healthCheckFlag = flag.String("health", "/health", "The path to the healthcheck endpoint.")
 var prefixFlag = flag.String("prefix", "", "The prefix to strip from incoming requests applied to the remote URL, e.g to make /api/user?id=1 map to /user?id=1")
+var scopesFlag = flag.String("scopes", "", "The scopes to validate from the token, defined as a comma delimmited string e.g. 'foo,moo'")
 
 func main() {
+	port, app, err := getApp()
+
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(-1)
+	}
+
+	http.ListenAndServe(":"+port, app)
+}
+
+func getApp() (string, http.Handler, error) {
 	flag.Parse()
 
 	remoteURL, err := getRemoteURL()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
+		return "", nil, err
 	}
 
 	keys, err := getKeys(os.Environ())
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
+		return "", nil, err
 	}
 
 	port, err := getPort()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
+		return "", nil, err
 	}
 
 	prefix := getPrefix()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
-	}
+
+	scopes := getScopes()
 
 	remoteHostHeader := getRemoteHostHeader()
 
@@ -60,7 +66,7 @@ func main() {
 	rewrite := NewRewriteHandler(prefix, proxy)
 
 	// Wrap the proxy in authentication.
-	auth := NewJWTAuthHandler(keys, time.Now, rewrite)
+	auth := NewJWTAuthHandler(keys, scopes, rewrite)
 
 	// Wrap the authentication in a health check (health checks don't need authentication).
 	health := HealthCheckHandler{
@@ -71,7 +77,7 @@ func main() {
 	// Wrap the health check in a logger.
 	app := NewLoggingHandler(health)
 
-	http.ListenAndServe(":"+port, app)
+	return port, app, nil
 }
 
 // NewReverseProxy creates a reverse proxy.
@@ -237,4 +243,22 @@ func getRemoteHostHeader() string {
 		h = os.Getenv("JWTPROXY_REMOTE_HOST_HEADER")
 	}
 	return h
+}
+
+func getScopes() []string {
+	s := *scopesFlag
+	if s == "" {
+		s = os.Getenv("JWTPROXY_SCOPES")
+	}
+	scopes := strings.Split(s, ",")
+	filter(&scopes, "")
+	return scopes
+}
+
+func filter(s *[]string, r string) {
+	for i, e := range *s {
+		if e == r {
+			*s = append((*s)[:i], (*s)[i+1:]...)
+		}
+	}
 }
